@@ -3,25 +3,28 @@
 import tornado.ioloop
 import tornado.web
 
-class PerformanceDatastore(object):
+class Datastore(object):
     def __init__(self):
         self._stats = {}
-        self.summarize = []
+        self.summarizers = []
+
     def set(self, host, label, value, timestamp):
         if host not in self._stats:
             self._stats[host] = {}
-            hourly = ioloop.PeriodicCallback(functools.partial(self.summarize, "by-minute", host, oldest_epoch_milliseconds = 60*60*1000), 60*1000)
-            hourly.start()
-            self.summarize.append(hourly)
-            daily = ioloop.PeriodicCallback(functools.partial(self.summarize, "by-hour", host, oldest_epoch_milliseconds = 24*60*60*1000), 60*60*1000)
-            daily.start()
-            self.summarize.append(daily)
+            self.add_summarizer(host, "by-minute", oldest_epoch_milliseconds = 60*60*1000, callback_interval = 60*1000)
+            self.add_summarizer(host, "by-hour", oldest_epoch_milliseconds = 24*60*60*1000, callback_interval = 60*60*1000)
 
         if label not in self._stats[host]:
             self._stats[host][label] = []
         self._stats[host][label].append((value, timestamp))
 
-    def summarize(self, summary_label, host, oldest_epoch_milliseconds):
+    def add_summarizer(host, summary_label, oldest_epoch_milliseconds, callback_interval):
+        s = functools.partial(self._summarize, host, summary_label, oldest_epoch_milliseconds)
+        s = ioloop.PeriodicCallback(s, callback_interval)
+        s.start()
+        self.summarizers.append(s)
+
+    def _summarize(self, host, summary_label, oldest_epoch_milliseconds):
         for label in self._stats[host]:
             _sum = 0
             _count = 0
@@ -43,7 +46,7 @@ class PerformanceDatastore(object):
 
 class PerformanceDataHandler(tornado.web.RequestHandler):
     def initialize(self, datastore):
-        pass
+        self.datastore = datastore
 
     @tornado.web.asynchronous
     def post(self):
