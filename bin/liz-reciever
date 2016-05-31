@@ -6,8 +6,40 @@ import tornado.web
 class PerformanceDatastore(object):
     def __init__(self):
         self._stats = {}
-    def set(host, label, value, timestamp):
+        self.summarize = []
+    def set(self, host, label, value, timestamp):
+        if host not in self._stats:
+            self._stats[host] = {}
+            hourly = ioloop.PeriodicCallback(functools.partial(self.summarize, "by-minute", host, oldest_epoch_milliseconds = 60*60*1000), 60*1000)
+            hourly.start()
+            self.summarize.append(hourly)
+            daily = ioloop.PeriodicCallback(functools.partial(self.summarize, "by-hour", host, oldest_epoch_milliseconds = 24*60*60*1000), 60*60*1000)
+            daily.start()
+            self.summarize.append(daily)
 
+        if label not in self._stats[host]:
+            self._stats[host][label] = []
+        self._stats[host][label].append((value, timestamp))
+
+    def summarize(self, summary_label, host, oldest_epoch_milliseconds):
+        for label in self._stats[host]:
+            _sum = 0
+            _count = 0
+            summary_label = "%s:%s" % (summary_label, label)
+            self._stats[host][summary_label] = []
+            for v, ts in self._stats[host][label]:
+                if ts <= oldest_epoch_milliseconds:
+                    self._stats[host][summary_label].append((v, ts))
+                    _count += 1
+                    _sum += v
+                elif ts > oldest_epoch_milliseconds:
+                    break
+            self._stats[host][summary_label] = {
+                "avg": (_sum / _count),
+                "sum": _sum,
+                "count": _count,
+                "data": self._stats[host][summary_label]
+            }
 
 class PerformanceDataHandler(tornado.web.RequestHandler):
     def initialize(self, datastore):
@@ -18,7 +50,8 @@ class PerformanceDataHandler(tornado.web.RequestHandler):
         ioloop.IOLoop.instance().add_callback(on_submit, self)
 
     def submit(self):
-        # handle stats
+        # parse request
+        # for each metric, call self.datastore.set(key, val, ts)
         pass
 
     def respond(self, response):
@@ -30,7 +63,8 @@ class PerformanceDataHandler(tornado.web.RequestHandler):
 
 def NewLizReciever():
     return tornado.web.Application([
-        (r"/perf", PerformanceDataHandler),
+        (r"/perf-endpoint1", PerformanceDataHandler),
+        (r"/perf-endpoint2", PerformanceDataHandler),
     ])
 
 if __name__ == "__main__":
