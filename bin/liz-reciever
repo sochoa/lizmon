@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+
+import tornado.ioloop
+import tornado.web
+
+class PerformanceDatastore(object):
+    def __init__(self):
+        self._stats = {}
+    def set(host, label, value, timestamp):
+
+
+class PerformanceDataHandler(tornado.web.RequestHandler):
+    def initialize(self, datastore):
+        pass
+
+    @tornado.web.asynchronous
+    def post(self):
+        ioloop.IOLoop.instance().add_callback(on_submit, self)
+
+    def submit(self):
+        # handle stats
+        pass
+
+    def respond(self, response):
+        if response.error: raise tornado.web.HTTPError(500)
+        json = tornado.escape.json_decode(response.body)
+        self.write("Fetched " + str(len(json["entries"])) + " entries "
+                   "from the FriendFeed API")
+        self.finish()
+
+def NewLizReciever():
+    return tornado.web.Application([
+        (r"/perf", PerformanceDataHandler),
+    ])
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-p", "--port", dest="port", type=int, help="HTTP Port to recieve on")
+    app = NewLizReciever()
+    app.listen(args.port)
+    tornado.ioloop.IOLoop.current().start()
+else:
+    sys.stderr.write("ERROR:  This is not a module and should not be imported")
+    sys.exit(1)
