@@ -27,6 +27,13 @@ pip install -r requirements.txt
 
 # Testing
 
+```
+. env/bin/activate
+nosetests
+```
+
+# Running
+
 ## The Liz Reciever
 
 The reciever will both recieve and summarize the reported data
@@ -91,3 +98,9 @@ this thing out.
 * Implement trust via certificate chains so that only trusted
 sources can request and use token-based authorization which can
 then be used to submit metrics.
+
+# Further Testing
+
+* Add web service tests to simulate a node reporting data to
+ensure that the reciever is doing the right thing.
+* Add unit tests for the Datastore class in the reciever.
