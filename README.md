@@ -27,10 +27,40 @@ pip install -r requirements.txt
 
 # Testing
 
-## Report performance data
+## The Liz Reciever
+
+The reciever will both recieve and summarize the reported data
+
+### API endpoints
+
+* `/api/perf/:host/:epoch` - Use this endpoint to `POST` data to the reciever.
+* `/api/perf/:host/:label` - Use this endpoint to `GET` data from the
+reciever.  The label parameter is optional, so if you don't provide
+that it'll give you all the summarized data it has for the host.  If
+you provide the label param, it will perform a case-insensitive
+string-contains to determine if the summarized data should be returned.
+An example of summarized data labels are: `summary:by-minute:mem` and
+`summary:by-hour:cpu`.
+
+### Run the Liz Reciever
 
 ```
-python bin/liz-monitor --this-host jarvis --publish http://localhost:8080/api/perf
+. env/bin/activate
+python bin/liz-reciever # defaults to port 8080
+```
+## Monitor your nodes
+
+### Details that the Liz Monitor needs to be aware of
+
+* What you call "this host".  This might be the hostname, or the
+IP, asset id, or something else entirely.
+* Where the reciever is that you would like to publish to.
+
+### Run the Liz Monitor
+
+```
+. env/bin/activate
+python bin/liz-monitor --this-host $(hostname) --publish http://localhost:8080/api/perf
 ```
 
 ## Get performance reporting data
@@ -46,3 +76,18 @@ Do this in one or more panes in your terminal on a Mac OS 10+ host.  Note, the i
 ```
 yes > /dev/null
 ```
+
+# Scaling
+
+* Use Redis, Elasticsearch (?), or Riak (?).
+* Break reciever and summarization into two different services.
+* Implement WSGI compliance and run behind Nginx
+* Implement autoscaling group with terraform on AWS to build
+this thing out.
+
+# Features
+
+* Dockerize all the things.
+* Implement trust via certificate chains so that only trusted
+sources can request and use token-based authorization which can
+then be used to submit metrics.
