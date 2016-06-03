@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 
-import tornado.ioloop
+import argparse
+import sys
+import json
+import codecs
+import functools
+from datetime import datetime, time
+
+import tornado.ioloop as ioloop
 import tornado.web
 
 class Datastore(object):
@@ -9,71 +16,139 @@ class Datastore(object):
         self.summarizers = []
 
     def set(self, host, label, value, timestamp):
+        min_sec = 60
+        hour_sec = 60*min_sec
+        day_sec = 24*hour_sec
         if host not in self._stats:
             self._stats[host] = {}
-            self.add_summarizer(host, "by-minute", oldest_epoch_milliseconds = 60*60*1000, callback_interval = 60*1000)
-            self.add_summarizer(host, "by-hour", oldest_epoch_milliseconds = 24*60*60*1000, callback_interval = 60*60*1000)
-
+            self.add_summarizer(host, "by-minute", hour_sec, min_sec)
+            self.add_summarizer(host, "by-hour", day_sec, hour_sec)
         if label not in self._stats[host]:
             self._stats[host][label] = []
+        # print("self._stats[%s][%s].append((%s, %s))" % (host, label, str(value), str(timestamp)))
         self._stats[host][label].append((value, timestamp))
+        # self._summarize(host, "by-minute", hour_sec, min_sec)
+        # self._summarize(host, "by-hour", day_sec, hour_sec)
 
-    def add_summarizer(host, summary_label, oldest_epoch_milliseconds, callback_interval):
-        s = functools.partial(self._summarize, host, summary_label, oldest_epoch_milliseconds)
-        s = ioloop.PeriodicCallback(s, callback_interval)
+    def get(self, host, requested = None):
+        stats = {}
+        try:
+            for label in self._stats[host]:
+                if not label.startswith("summary:"):
+                    continue
+                if requested == None or requested in label:
+                    stats[label] = self._stats[host][label]
+        except:
+            pass
+        return stats
+
+    def add_summarizer(self, host, label, oldest_sec, callback_interval_sec):
+        s = functools.partial(self._summarize, host, label, oldest_sec, callback_interval_sec)
+        s = ioloop.PeriodicCallback(s, callback_interval_sec)
         s.start()
         self.summarizers.append(s)
 
-    def _summarize(self, host, summary_label, oldest_epoch_milliseconds):
-        for label in self._stats[host]:
-            _sum = 0
-            _count = 0
-            summary_label = "%s:%s" % (summary_label, label)
-            self._stats[host][summary_label] = []
-            for v, ts in self._stats[host][label]:
-                if ts <= oldest_epoch_milliseconds:
-                    self._stats[host][summary_label].append((v, ts))
-                    _count += 1
-                    _sum += v
-                elif ts > oldest_epoch_milliseconds:
-                    break
+    def _summarize(self, host, summary_type, oldest_epoch_sec, interval_sec, *args, **kwargs):
+        start_sec = (datetime.utcnow().timestamp() - oldest_epoch_sec)
+
+        labels = list(self._stats[host].keys())[:]
+        for label in labels:
+            if label.startswith("summary:"):
+                continue
+
+            now_sec = datetime.utcnow().timestamp()
+            then_sec = now_sec - oldest_epoch_sec
+
+            # skip to the prev interval from the oldest
+            if then_sec % interval_sec > 0:
+                then_sec -= int(then_sec % interval_sec)
+            start_sec = then_sec
+            summary_label = "summary:%s:%s" % (summary_type, label)
+            data_points = []
+            start_interval_sec = then_sec
+            end_interval_sec = then_sec + interval_sec
+
+            while then_sec < now_sec:
+                interval_items = []
+                for v, ts in self._stats[host][label]:
+                    ts = int(ts)
+                    try:
+                        v = float(v)
+                    except:
+                        try:
+                            v = int(v)
+                        except:
+                            print("ERROR:  Cannot convert string to a number, value=%s" % str(v))
+                            continue
+
+                    if start_interval_sec < ts and ts <= end_interval_sec:
+                        interval_items.append(v)
+
+                if len(interval_items) > 0:
+                    _sum = sum(interval_items)
+                    _avg = _sum / len(interval_items)
+                    if not float(_avg).is_integer():
+                        _avg = round(_avg, 2)
+                    pt = {
+                        "start-sec": int(start_interval_sec),
+                        "end-sec": int(end_interval_sec),
+                        "interval-size-sec": (int(end_interval_sec) - int(start_interval_sec)),
+                        "num-samples": len(interval_items),
+                        "avg": _avg,
+                    }
+                    data_points.append(pt)
+
+                if len(data_points) > 60:
+                    data_points = data_points[-60:]
+
+                if (then_sec + interval_sec) < now_sec:
+                    then_sec += interval_sec
+                else:
+                    then_sec = now_sec
+
+                start_interval_sec += interval_sec
+                end_interval_sec += interval_sec
+
+            if len(data_points) == 0:
+                continue
             self._stats[host][summary_label] = {
-                "avg": (_sum / _count),
-                "sum": _sum,
-                "count": _count,
-                "data": self._stats[host][summary_label]
+                "start": int(start_sec),
+                "end": int(now_sec),
+                "averages": data_points,
+                "timeslice-size-sec": interval_sec,
+                "average-count": len(data_points),
             }
 
-class PerformanceDataHandler(tornado.web.RequestHandler):
-    def initialize(self, datastore):
-        self.datastore = datastore
+class DataDrivenHandler(tornado.web.RequestHandler):
+    def initialize(self, *args, **kwargs):
+        if "datastore" in kwargs:
+            self.datastore = kwargs["datastore"]
+        else:
+            raise Exception("Unable to locate datastore argument for request handler:  "\
+                            "args=%s, kwargs=%s" % (str(args), str(kwargs)))
 
-    @tornado.web.asynchronous
-    def post(self):
-        ioloop.IOLoop.instance().add_callback(on_submit, self)
+class ReportingHandler(DataDrivenHandler):
+    def get(self, host, label = None):
+        self.write(json.dumps(self.datastore.get(host, label)))
 
-    def submit(self):
-        # parse request
-        # for each metric, call self.datastore.set(key, val, ts)
-        pass
+class MetricsReciever(DataDrivenHandler):
+    def post(self, host, ts):
+        reader = codecs
+        data = json.loads(self.request.body.decode("utf-8"))
+        for k, v in data.items():
+            self.datastore.set(host, k, v, ts)
 
-    def respond(self, response):
-        if response.error: raise tornado.web.HTTPError(500)
-        json = tornado.escape.json_decode(response.body)
-        self.write("Fetched " + str(len(json["entries"])) + " entries "
-                   "from the FriendFeed API")
-        self.finish()
-
-def NewLizReciever():
+def NewLizReciever(**kwargs):
     return tornado.web.Application([
-        (r"/perf-endpoint1", PerformanceDataHandler),
-        (r"/perf-endpoint2", PerformanceDataHandler),
+        (r"/api/perf/(?P<host>[^\/]+)/(?P<ts>[0-9]+)", MetricsReciever, kwargs),
+        (r"/api/perf/(?P<host>[^\/]+)(?:/(?P<label>.+))?", ReportingHandler, kwargs),
     ])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p", "--port", dest="port", type=int, help="HTTP Port to recieve on")
-    app = NewLizReciever()
+    parser.add_argument("-p", "--port", dest="port", type=int, help="HTTP Port to recieve on", default = 8080)
+    args = parser.parse_args()
+    app = NewLizReciever(datastore = Datastore())
     app.listen(args.port)
     tornado.ioloop.IOLoop.current().start()
 else:
