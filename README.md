@@ -114,13 +114,9 @@ Do this in one or more panes in your terminal on a Mac OS 10+ host.  Note, the i
 yes > /dev/null
 ```
 
-# Scaling
+# Persistance
 
 * Use Redis, Elasticsearch (?), or Riak (?).
-* Break receiver and summarization into two different services.
-* Implement WSGI compliance and run behind Nginx
-* Implement autoscaling group with terraform on AWS to build
-this thing out.
 
 # Further Testing
 
@@ -131,8 +127,17 @@ ensure that the receiver is doing the right thing.
 # Features
 
 * Improve logging across the two components.
+* Break receiver and summarization into two different services.
+* Add API endpoint for reporting a distinct list of hosts that have reported data.
+* Implement data expiration.
 * Change transport from HTTP => UDP + ZeroMQ, because metrics shouldn't have that much overhead.
-* Dockerize all the things.
 * Implement trust via certificate chains so that only trusted
 sources can request and use token-based authorization which can
 then be used to submit metrics.
+
+# Deployment Improvements
+
+* Implement WSGI compliance and run behind Nginx
+* Dockerize all the things.
+* Implement autoscaling group with terraform on AWS to build
+this thing out.
