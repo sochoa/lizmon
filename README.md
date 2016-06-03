@@ -131,8 +131,8 @@ ensure that the receiver is doing the right thing.
 # Features
 
 * Improve logging across the two components.
+* Change transport from HTTP => UDP + ZeroMQ, because metrics shouldn't have that much overhead.
 * Dockerize all the things.
 * Implement trust via certificate chains so that only trusted
 sources can request and use token-based authorization which can
 then be used to submit metrics.
-
